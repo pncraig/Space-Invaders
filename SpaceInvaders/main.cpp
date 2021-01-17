@@ -21,8 +21,10 @@ struct asset {
 // Environment variables
 int nFirstBlockX = 4;
 int nFirstBlockY = 50;
-int nNumberOfBlocks = 7;
+int nBlockSize = 14;
+const int nNumberOfBlocks = 7;
 int nBlockSpacing = 4;
+wstring blocks[nNumberOfBlocks];
 
 // Player variables
 int nPlayerX = nScreenWidth / 2;
@@ -65,22 +67,23 @@ int main() {
 
 	// Block asset
 	asset blockAsset;
-	blockAsset.width = 14;
-	blockAsset.height = 14;
-	blockAsset.shape = L"##############";
-	blockAsset.shape = L"##############";
-	blockAsset.shape = L"##############";
-	blockAsset.shape = L"##############";
-	blockAsset.shape = L"##############";
-	blockAsset.shape = L"##############";
-	blockAsset.shape = L"##############";
-	blockAsset.shape = L"##############";
-	blockAsset.shape = L"##############";
-	blockAsset.shape = L"##############";
-	blockAsset.shape = L"##############";
-	blockAsset.shape = L"##############";
-	blockAsset.shape = L"##############";
-	blockAsset.shape = L"##############";
+	blockAsset.shape += L"##############";
+	blockAsset.shape += L"##############";
+	blockAsset.shape += L"##############";
+	blockAsset.shape += L"##############";
+	blockAsset.shape += L"##############";
+	blockAsset.shape += L"##############";
+	blockAsset.shape += L"##############";
+	blockAsset.shape += L"##############";
+	blockAsset.shape += L"##############";
+	blockAsset.shape += L"##############";
+	blockAsset.shape += L"##############";
+	blockAsset.shape += L"##############";
+	blockAsset.shape += L"##############";
+	blockAsset.shape += L"##############";
+
+	for (int i = 0; i < nNumberOfBlocks; i++) 
+		blocks[i] = blockAsset.shape;
 
 	while (1) {
 		for (int i = 0; i < nScreenWidth * nScreenHeight; i++)
@@ -112,22 +115,70 @@ int main() {
 		/* Handle bullet block collisions -------------------------------------------------------*/
 
 		// Player bullet
+		for (int i = 0; i < (signed)vcPlayerBullets.size(); i++) {
+			// Skip bullets that can't hit the blocks
+			if (vcPlayerBullets[i].Y < nFirstBlockY)
+				continue;
+
+			// Start with 0 because we increment the variable at the start of the loop
+			int currentBlock = -1;
+			bool collided = false;
+			for (int l = nFirstBlockX; l < (nBlockSize + nBlockSpacing) * nNumberOfBlocks; l += nBlockSpacing + nBlockSize) {
+				currentBlock++;
+				for (int x = l; x < l + nBlockSize; x++) {
+					for (int y = nFirstBlockY; y < nFirstBlockY + nBlockSize; y++) {
+						// Skip if the bullet isn't colliding with the current tile
+						if (!(vcPlayerBullets[i].X == x && vcPlayerBullets[i].Y == y)) {
+							continue;
+						} else {
+							switch (blocks[currentBlock][(y - nFirstBlockY) * nBlockSize + (x - l)]) {
+								case ' ':
+									break;
+								case '#':
+									blocks[currentBlock][(y - nFirstBlockY) * nBlockSize + (x - l)] = L' ';
+									vcPlayerBullets.erase(vcPlayerBullets.begin() + i);
+									// We want to stop running checks with this specific vector element
+									collided = true;
+									break;
+							}
+						}
+						// Break all the loops except the outermost loop
+						if (collided)
+							break;
+					}
+					if (collided)
+						break;
+				}
+				if (collided)
+					break;
+			}
+		}
 
 
 		/* Display ------------------------------------------------------------------------------*/
 
+		// Display blocks
+		int currentBlock = -1;
+		for (int i = nFirstBlockX; i < (nBlockSize + nBlockSpacing) * nNumberOfBlocks; i += nBlockSpacing + nBlockSize) {
+			currentBlock++;
+			for (int x = i; x < i + nBlockSize; x++) {
+				for (int y = nFirstBlockY; y < nFirstBlockY + nBlockSize; y++) {
+					wstring thisBlock = blocks[currentBlock];
+					switch (thisBlock[(y - nFirstBlockY) * nBlockSize + (x - i)]) {
+						case '#':
+							screen[y * nScreenWidth + x] = L'\u2588';
+							break;
+						case ' ':
+							screen[y * nScreenWidth + x] = L' ';
+							break;
+					}
+				}
+			}
+		}
+
 		// Display bullets
 		for (int i = 0; i < (signed)vcPlayerBullets.size(); i++) {
 			screen[vcPlayerBullets[i].Y * nScreenWidth + vcPlayerBullets[i].X] = L'|';
-		}
-
-		// Display blocks
-		for (int i = nFirstBlockX; i < (blockAsset.width + nBlockSpacing) * nNumberOfBlocks; i += nBlockSpacing + blockAsset.width) {
-			for (int x = i; x < i + blockAsset.width; x++) {
-				for (int y = nFirstBlockY; y < nFirstBlockY + blockAsset.height; y++) {
-					screen[y * nScreenWidth + x] = L'\u2588';
-				}
-			}
 		}
 
 		// Diplay player
@@ -143,6 +194,8 @@ int main() {
 				}
 			}
 		}
+
+		wprintf_s(screen, 196, L'%s', blocks[0]);
 
 		screen[nScreenWidth * nScreenHeight] = '\0';
 		WriteConsoleOutputCharacter(hConsole, screen, nScreenWidth * nScreenHeight, { 0, 0 }, &dwBytesWritten);
