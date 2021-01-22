@@ -7,6 +7,7 @@
 #include <thread>
 #include <vector>
 #include <stdlib.h>
+#include <ctime>
 using namespace std;
 
 int nScreenWidth = 230;
@@ -49,17 +50,19 @@ vector<vector<COORD>> vColumns;
 int nFirstAlienX = nColumnDistFromEdge;
 int nFirstAlienY = 20;
 
-int nMovementTickRate = 10;
-int nAlienVel;
+int nAlienTickRate = 5;
+int nAlienVel = 2;
 
 int nTorpedoVel = 1;
 int nAlienFireRate = 20;
-vector<COORD> vcAlienTorpedoes;
+vector<COORD> vAlienTorpedoes;
 
 
 int clamp(int, int, int);
 
 int main() {
+	srand((int)time(0));
+
 	wchar_t* screen = new wchar_t[nScreenWidth * nScreenHeight];
 	HANDLE hConsole = CreateConsoleScreenBuffer(GENERIC_READ | GENERIC_WRITE, 0, NULL, CONSOLE_TEXTMODE_BUFFER, NULL);
 	SetConsoleActiveScreenBuffer(hConsole);
@@ -112,16 +115,16 @@ int main() {
 
 	// Second alien asset
 	asset alien2Asset;
-	alien2Asset.width = 12;
+	alien2Asset.width = 11;
 	alien2Asset.height = 8;
-	alien2Asset.shape += L"..#.....#...";
-	alien2Asset.shape += L"...#...#....";
-	alien2Asset.shape += L"..#######...";
-	alien2Asset.shape += L".##.###.##..";
-	alien2Asset.shape += L"###########.";
-	alien2Asset.shape += L"#.#######.#.";
-	alien2Asset.shape += L"#.#.....#.#.";
-	alien2Asset.shape += L"...##.##....";
+	alien2Asset.shape += L"..#.....#..";
+	alien2Asset.shape += L"...#...#...";
+	alien2Asset.shape += L"..#######..";
+	alien2Asset.shape += L".##.###.##.";
+	alien2Asset.shape += L"###########";
+	alien2Asset.shape += L"#.#######.#";
+	alien2Asset.shape += L"#.#.....#.#";
+	alien2Asset.shape += L"...##.##...";
 
 	// Third alien asset
 	asset alien3Asset;
@@ -161,8 +164,16 @@ int main() {
 	// Initialize the vColumns vector with vectors which represent the indiviual columns
 	for (int i = 1; i <= nNumberOfColumns; i++) {
 		vector<COORD> column;
+		int currentAlien = 0;
+		// Loop through every ROW (the 6 is the number of rows) and figure out what the y is
 		for (int y = nFirstAlienY; y < nFirstAlienY + ((12 + nVerticalSpacing) * 6); y += nVerticalSpacing + 12) {
-			column.push_back({ short(nFirstAlienX * i), (short)y });
+			// Keep the alien with a smaller width value in line with the other aliens
+			int margin = 0;
+			if (currentAlien % 3 == 2)
+				margin = 2;
+			column.push_back({ short(nFirstAlienX * i + margin), (short)y });
+
+			currentAlien++;
 		}
 		vColumns.push_back(column);
 	}
@@ -185,7 +196,20 @@ int main() {
 
 		nPlayerX = clamp(nPlayerX, 0, nScreenWidth - playerAsset.width);
 
-		/* Handle bullets -----------------------------------------------------------------------*/
+		/* Handle alien movement ----------------------------------------------------------------*/
+
+		if (iterations % nAlienTickRate == 0) {
+			if (vColumns.back().back().X + alien3Asset.width > nScreenWidth - nColumnDistFromEdge || vColumns.front().back().X < nColumnDistFromEdge)
+				nAlienVel *= -1;
+
+			for (int i = 0; i < (signed)vColumns.size(); i++) {
+				for (int l = 0; l < (signed)vColumns[i].size(); l++) {
+					vColumns[i][l].X += nAlienVel;
+				}
+			}
+		}
+
+		/* Handle player bullets ----------------------------------------------------------------*/
 
 		for (int i = 0; i < (signed)vcPlayerBullets.size();  i++) {
 			if (vcPlayerBullets[i].Y <= 0) {
@@ -194,6 +218,23 @@ int main() {
 			}
 
 			vcPlayerBullets.at(i).Y -= nBulletSpeed;
+		}
+
+		/* Handle alien torpedoes ---------------------------------------------------------------*/
+
+		int randomColumnIndex = rand() % vColumns.size();
+		COORD firingAlien = vColumns[randomColumnIndex].back();
+
+		if (iterations % nAlienFireRate == 0)
+			vAlienTorpedoes.push_back({ firingAlien.X + 5, firingAlien.Y + 5});
+
+		for (int i = 0; i < (signed)vAlienTorpedoes.size(); i++) {
+			if (vAlienTorpedoes[i].Y >= nScreenHeight) {
+				vAlienTorpedoes.erase(vAlienTorpedoes.begin() + i);
+				continue;
+			}
+
+			vAlienTorpedoes[i].Y += nTorpedoVel;
 		}
 
 		/* Handle bullet block collisions -------------------------------------------------------*/
@@ -212,7 +253,7 @@ int main() {
 				for (int x = l; x < l + nBlockSize; x++) {
 					for (int y = nFirstBlockY; y < nFirstBlockY + nBlockSize; y++) {
 						// Skip if the bullet isn't colliding with the current tile
-						if (!(vcPlayerBullets[i].X == x && (vcPlayerBullets[i].Y <= y && vcPlayerBullets[i].Y + 3 >= y))) {
+						if (!(vcPlayerBullets[i].X == x && (vcPlayerBullets[i].Y == y || vcPlayerBullets[i].Y + 1 == y))) {
 							continue;
 						} else {
 							switch (blocks[currentBlock][(y - nFirstBlockY) * nBlockSize + (x - l)]) {
@@ -258,6 +299,44 @@ int main() {
 			}
 		}
 
+		/* Player bullets against aliens --------------------------------------------------------*/
+
+		bool hitAlien = false;
+		for (int i = 0; i < (signed)vcPlayerBullets.size(); i++) {
+			hitAlien = false;
+			for (int l = 0; l < (signed)vColumns.size(); l++) {
+				for (int j = 0; j < (signed)vColumns[l].size(); j++) {
+					int width = 12;
+					if (vColumns[l][j].Y % 3 == 0)
+						width = 8;
+					// All alien assets are the same height
+					int height = alien1Asset.height;
+
+					if (vcPlayerBullets[i].X > vColumns[l][j].X && vcPlayerBullets[i].X < vColumns[l][j].X + width &&
+						vcPlayerBullets[i].Y > vColumns[l][j].Y && vcPlayerBullets[i].Y < vColumns[l][j].Y + height) {
+
+						vcPlayerBullets.erase(vcPlayerBullets.begin() + i);
+
+						if (!vColumns[l].empty())
+							vColumns[l].erase(vColumns[l].begin() + j);
+
+						hitAlien = true;
+						break;
+					}
+					if (hitAlien)
+						break;
+				}
+				if (hitAlien)
+					break;
+			}
+		}
+
+		// Manage empty columns of aliens
+		for (int i = 0; i < (signed)vColumns.size(); i++) {
+			if (vColumns[i].empty())
+				vColumns.erase(vColumns.begin() + i);
+		}
+
 
 		/* Display ------------------------------------------------------------------------------*/
 
@@ -285,10 +364,21 @@ int main() {
 			displayAsset(vcPlayerBullets[i].X, vcPlayerBullets[i].Y, bulletAsset, screen);
 		}
 
+		// Display torpedoes
+		for (int i = 0; i < (signed)vAlienTorpedoes.size(); i++)
+			// I want to make the x and y coordinates the tip of the torpedoe
+			displayAsset(vAlienTorpedoes[i].X - (int(torpedoAsset.width / 2)), vAlienTorpedoes[i].Y - torpedoAsset.height, torpedoAsset, screen);
+
+		// Display aliens
 		for (int i = 0; i < (signed)vColumns.size(); i++) {
 			for (int l = 0; l < (signed)vColumns[i].size(); l++) {
 				COORD currentAlien = vColumns[i][l];
-				displayAsset(currentAlien.X, currentAlien.Y, alien1Asset, screen);
+				if (currentAlien.Y % 3 == 0)
+					displayAsset(currentAlien.X, currentAlien.Y, alien1Asset, screen);
+				else if (currentAlien.Y % 3 == 1)
+					displayAsset(currentAlien.X, currentAlien.Y, alien2Asset, screen);
+				else if (currentAlien.Y % 3 == 2)
+					displayAsset(currentAlien.X, currentAlien.Y, alien3Asset, screen);
 			}
 		}
 
