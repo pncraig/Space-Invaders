@@ -24,16 +24,19 @@ void displayAsset(int, int, asset&, wchar_t*);
 
 // Environment variables
 int nFirstBlockX = 8;
-int nFirstBlockY = nScreenHeight - 40;
+int nFirstBlockY = nScreenHeight - 50;
 int nBlockSize = 20;
 const int nNumberOfBlocks = 8;
 int nBlockSpacing = 8;
 wstring blocks[nNumberOfBlocks];
 
+int nBlastRadius = 4;
+
 // Player variables
 int nPlayerX = nScreenWidth / 2;
-int nPlayerY = nScreenHeight - 7;
+int nPlayerY = nScreenHeight - 14;
 int nPlayerVel = 1;
+int nPlayerLives = 3;
 
 int nFireRate = 10;
 int iterations = 0;
@@ -57,6 +60,7 @@ int nTorpedoVel = 1;
 int nAlienFireRate = 20;
 vector<COORD> vAlienTorpedoes;
 
+void collideProjectileWithBlock(vector<COORD>& projectileVector, int vectorIndex, int blastRadius);
 
 int clamp(int, int, int);
 
@@ -139,6 +143,7 @@ int main() {
 	alien3Asset.shape += L"..##.##.##..";
 	alien3Asset.shape += L"##........##";
 	
+	// Torpedo asset
 	asset torpedoAsset;
 	torpedoAsset.width = 3;
 	torpedoAsset.height = 4;
@@ -245,58 +250,15 @@ int main() {
 			if (vcPlayerBullets[i].Y < nFirstBlockY)
 				continue;
 
-			// Start with 0 because we increment the variable at the start of the loop
-			int currentBlock = -1;
-			bool collided = false;
-			for (int l = nFirstBlockX; l < (nBlockSize + nBlockSpacing) * nNumberOfBlocks; l += nBlockSpacing + nBlockSize) {
-				currentBlock++;
-				for (int x = l; x < l + nBlockSize; x++) {
-					for (int y = nFirstBlockY; y < nFirstBlockY + nBlockSize; y++) {
-						// Skip if the bullet isn't colliding with the current tile
-						if (!(vcPlayerBullets[i].X == x && (vcPlayerBullets[i].Y == y || vcPlayerBullets[i].Y + 1 == y))) {
-							continue;
-						} else {
-							switch (blocks[currentBlock][(y - nFirstBlockY) * nBlockSize + (x - l)]) {
-								case '.':
-									break;
-								case '#':
-									for (int inc = -2; inc < 3; inc++) {
-										if ((x - l) + inc >= 0 && (x - l) + inc < nBlockSize)
-											blocks[currentBlock][(y - nFirstBlockY) * nBlockSize + (x - l + inc)] = L'.';
+			collideProjectileWithBlock(vcPlayerBullets, i, nBlastRadius);
+		}
 
-										if ((y - nFirstBlockY) + inc >= 0 && (y - nFirstBlockY) + inc < nBlockSize)
-											blocks[currentBlock][(y - nFirstBlockY + inc) * nBlockSize + (x - l)] = L'.';
-
-										if (inc > -2 && inc < 2) {
-											if ((x - l) + inc >= 0 && (x - l) + inc < nBlockSize &&
-												(y - nFirstBlockY) + inc >= 0 && (y - nFirstBlockY) + inc < nBlockSize) {
-												blocks[currentBlock][(y - nFirstBlockY + inc) * nBlockSize + (x - l + inc)] = L'.';
-
-												// Stop the bullet from destroying the other side of the block
-												int incControl = 1;
-												if (x - l - inc >= nBlockSize || x - l - inc <= 0)
-													incControl = 0;
-												blocks[currentBlock][(y - nFirstBlockY + inc) * nBlockSize + (x - l - (inc * incControl))] = L'.';
-											}
-										}
-									}
-
-									vcPlayerBullets.erase(vcPlayerBullets.begin() + i);
-									// We want to stop running checks with this specific vector element
-									collided = true;
-									break;
-							}
-						}
-						// Break all the loops except the outermost loop
-						if (collided)
-							break;
-					}
-					if (collided)
-						break;
-				}
-				if (collided)
-					break;
-			}
+		// Alien torpedo
+		for (int i = 0; i < (signed)vAlienTorpedoes.size(); i++) {
+			if (vAlienTorpedoes[i].Y > nFirstBlockY + nBlockSize)
+				continue;
+			
+			collideProjectileWithBlock(vAlienTorpedoes, i, nBlastRadius);
 		}
 
 		/* Player bullets against aliens --------------------------------------------------------*/
@@ -306,6 +268,7 @@ int main() {
 			hitAlien = false;
 			for (int l = 0; l < (signed)vColumns.size(); l++) {
 				for (int j = 0; j < (signed)vColumns[l].size(); j++) {
+					// Only one alien asset has a different size than the others
 					int width = 12;
 					if (vColumns[l][j].Y % 3 == 0)
 						width = 8;
@@ -337,6 +300,15 @@ int main() {
 				vColumns.erase(vColumns.begin() + i);
 		}
 
+		/* Alien Torpedoes Against Player -------------------------------------------------------*/
+
+		for (int i = 0; i < (signed)vAlienTorpedoes.size(); i++) {
+			if (vAlienTorpedoes[i].X > nPlayerX && vAlienTorpedoes[i].X < nPlayerX + playerAsset.width &&
+				vAlienTorpedoes[i].Y > nPlayerY && vAlienTorpedoes[i].Y < nPlayerY + playerAsset.height) {
+				nPlayerLives--;
+				vAlienTorpedoes.erase(vAlienTorpedoes.begin() + i);
+			}
+		}
 
 		/* Display ------------------------------------------------------------------------------*/
 
@@ -382,6 +354,11 @@ int main() {
 			}
 		}
 
+		// Display player lives
+		for (int i = 1; i < nPlayerLives + 1; i++) {
+			displayAsset(7 * i, nScreenHeight - 7, playerAsset, screen);
+		}
+
 		// Diplay player
 		displayAsset(nPlayerX, nPlayerY, playerAsset, screen);
 
@@ -402,8 +379,55 @@ void displayAsset(int assetX, int assetY, asset& assetToDraw, wchar_t* screen) {
 					screen[y * nScreenWidth + x] = L'\u2588';
 					break;
 				case '.':
-					screen[y * nScreenWidth + x] = L' ';
 					break;
+			}
+		}
+	}
+}
+
+void collideProjectileWithBlock(vector<COORD>& projectileVector, int vectorIndex, int blastRadius) {
+	int currentBlock = -1;
+	bool collidedWithBlock = false;
+	// l is equal to the x coordinate of the current block
+	for (int l = nFirstBlockX; l < (nBlockSize + nBlockSpacing) * nNumberOfBlocks; l += nBlockSpacing + nBlockSize) {
+		currentBlock++;
+		for (int x = l; x < l + nBlockSize; x++) {
+			for (int y = nFirstBlockY; y < nFirstBlockY + nBlockSize; y++) {
+				// Skip if the projectile isn't colliding
+				if (!(projectileVector[vectorIndex].X == x && projectileVector[vectorIndex].Y == y))
+					continue;
+				else {
+					collidedWithBlock = true;
+					// Only run this if the block isn't an empty space
+					if (blocks[currentBlock][(y - nFirstBlockY) * nBlockSize + (x - l)] == '#') {
+						// Loops through a smaller area which contains the blast radius, sort of like a bounding box
+						for (int blastX = x - blastRadius; blastX < x + blastRadius; blastX++) {
+							for (int blastY = y - blastRadius; blastY < y + blastRadius; blastY++) {
+								// Use the pythagorean theorem to calculate if the current character cell falls within the blast radius
+								int a = x - blastX;
+								int b = y - blastY;
+								double dist = sqrt(a * a + b * b);
+								if (dist > (double)blastRadius)
+									continue;
+
+								// Keeps the x from overflowing onto the other side
+								int xPortion = blastX - l;
+								if (xPortion < 0)
+									xPortion = 0;
+								if (xPortion >= nBlockSize)
+									xPortion = nBlockSize - 1;
+
+								// Only changes the block string if it is sure that it is in range
+								int blockCharacterIndex = (blastY - nFirstBlockY) * nBlockSize + xPortion;
+								if (!(blockCharacterIndex < 0 || blockCharacterIndex >= nBlockSize * nBlockSize)) {
+									blocks[currentBlock][blockCharacterIndex] = '.';
+								}
+							}
+						}
+						projectileVector.erase(projectileVector.begin() + vectorIndex);
+						return;
+					}
+				}
 			}
 		}
 	}
